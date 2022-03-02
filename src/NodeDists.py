@@ -49,7 +49,7 @@ def Transform(corners, Meshgrid, nx, ny):
     for i in range(nx):
         for j in range(ny):
             XY[i + nx * j, :] = [x[i, j], y[i, j]]
-
+    XY += corners[-1, :] # Shift into right position
     return XY
 
 

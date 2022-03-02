@@ -27,6 +27,7 @@ class Mesh():
         self.node_dist = coord_func
         self.make_mesh()
         self.pins = np.array([False] * 2 * nx * ny).reshape((nx*ny, 2))
+        self.forces = np.zeros_like(self.pins)
 
         self.edges = {'top' : np.array([ny * (i + 1) - 1 for i in range(nx)]),
                       'bottom' : np.array([i * (ny) for i in range(nx)]),
@@ -112,4 +113,100 @@ class Mesh():
         pins[i, j] pins node i in the xj direction
         '''
         self.pins = pins
+
+    def copy(self):
+        return Mesh(self.corners, self.nx, self.ny, self.node_dist)
+    
+    def __add__(self, mesh2):
+        mesh1 = self.copy()
+        mesh1 += mesh2
+        return mesh1
+    
+    def __iadd__(self, mesh2):
+        '''
+        Glue two meshes together via overlapping nodes
+
+        Requires there to be a shared edge, with same number of nodes in that direction
+        Ie, two shared corners, and one of nx or ny to be the same
+
+        Also requires the coord_func to be the same
+        '''
+        # Check number of shared corners
+        assert np.sum(np.in1d(self.corners[:, 0], mesh2.corners[:, 0]) * np.in1d(self.corners[:, 1], mesh2.corners[:, 1])) == 2
+
+        # Check if nx or ny match
+        assert (self.nx == mesh2.nx) + (self.ny == mesh2.ny)
+
+        # Check if coord_func bias method is the same
+        assert self.node_dist == mesh2.node_dist
+
+        # Find shared edge
+        if np.all(self.XY[self.edges['left']] == mesh2.XY[mesh2.edges['right']]):
+            # mesh2 is to the left of self
+            mesh1_shared = self.edges['left']
+            mesh2_shared = mesh2.edges['right']
         
+        elif np.all(self.XY[self.edges['right']] == mesh2.XY[mesh2.edges['left']]):
+            # mesh2 is to the right
+            mesh1_shared = self.edges['right']
+            mesh2_shared = mesh2.edges['left']
+        
+        elif np.all(self.XY[self.edges['top']] == mesh2.XY[mesh2.edges['bottom']]):
+            # mesh2 is above
+            mesh1_shared = self.edges['top']
+            mesh2_shared = mesh2.edges['bottom']
+
+        elif np.all(self.XY[self.edges['bottom']] == mesh2.XY[mesh2.edges['top']]):
+            #mesh2 is below
+            mesh1_shared = self.edges['bottom']
+            mesh2_shared = mesh2.edges['top']
+        
+        else:
+            raise Exception("Could not find a shared edge")
+
+        mesh2_ELS_copy = mesh2.ELS.copy()
+
+        offset = np.max(self.ELS) + 1
+        for i in range(len(mesh2_ELS_copy)):
+            for j in range(4):
+                # Replace node ids in mesh2 with duplicates in self
+                mask = (mesh1_shared == mesh2_ELS_copy[i, j])
+                if np.sum(mask):
+                    # ELS[i, j] is a shared node
+                    mesh2_ELS_copy[i, j] = mesh1_shared[mask][0]
+                else:
+                    # no shared nodes
+                    elem_offset = offset #- np.sum(mesh2_ELS_copy[i, j] < mesh1_shared)
+                    mesh2_ELS_copy[i, j] += elem_offset
+        
+        #mask = np.arange(self.nx * self.ny) != mesh1_shared
+        #mesh2_ELS_copy[mask] += (np.max(self.ELS) + 1) # Relabel new nodes
+
+
+        mask = np.arange(mesh2.nx * mesh2.ny) != mesh2_shared
+
+        total_XY = np.append(self.XY, mesh2.XY[mask][0, :, :], axis=0) # mask out duplicated nodes
+        total_ELS = np.append(self.ELS, mesh2_ELS_copy, axis=0)
+        print(total_XY.shape)
+        print(total_ELS)
+        self.XY = total_XY
+        self.ELS = total_ELS
+
+        nnodes = len(total_ELS[:, 0])
+        self.DOF = np.zeros((nnodes, 8), dtype=int)
+
+        # Regenerate dofs
+        for i in range(nnodes):
+            self.DOF[i, :] = [self.ELS[i,0]*2, self.ELS[i,1]*2-1, self.ELS[i,1]*2, self.ELS[i,1]*2+1, self.ELS[i,2]*2, self.ELS[i,2]*2+1, self.ELS[i,3]*2, self.ELS[i,3]*2+1]
+        
+        # Merge pins
+        self.pins = np.append(self.pins, mesh2.pins[mask][0, :, :], axis=0)
+        #Merge forces
+        self.forces = np.append(self.forces, mesh2.forces[mask][0, :, :], axis=0)
+
+        return self
+
+
+
+
+

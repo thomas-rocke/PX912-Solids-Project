@@ -3,6 +3,7 @@ Solves FEM given mesh and material properties
 
 '''
 from cProfile import label
+from attr import attributes
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -84,8 +85,15 @@ class FEM():
         self.elasticity = elasticity_func
         self.quad_points = quad_points
         self.K = np.zeros((2 * self.mesh.nnodes, 2 * self.mesh.nnodes))
-        self.forces = np.zeros((2 * self.mesh.nnodes))
         self.displacements = np.zeros((2 * self.mesh.nnodes))
+
+    @property
+    def forces(self):
+        '''
+        Alias for forces
+        '''
+        return self.mesh.forces
+
 
     def strain_displacement(self, corners, xi, eta):
         '''

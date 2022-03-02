@@ -20,10 +20,21 @@ plt.scatter(corners[:, 0], corners[:, 1], color='r')
 plt.show()
 '''
 
-n = 50
+n = 3
 
 mesh = Mesh(corners, n, n, coord_func=Uniform)
 
+corners2 = np.array([[0, 2],
+                     [3, 1],
+                     [2, 1],
+                     [0, 1]])
+mesh2 = Mesh(corners2, n, n, coord_func=Uniform)
+mesh.plot()
+mesh2.plot()
+
+comb = mesh + mesh2
+comb.plot()
+'''
 force = np.array([0, -20])
 edge='top'
 
@@ -36,3 +47,5 @@ solver.pin_edge('left', 1)
 mesh.plot(show_ids=False)
 solver.solve()
 solver.show_deformation(magnification=10000)
+
+'''
