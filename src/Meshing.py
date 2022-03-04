@@ -85,14 +85,17 @@ class Mesh():
             plt.plot(self.XY[cond==True, 0], self.XY[cond==True, 1], 'sk', label='Free')
 
         for i in range(len(self.ELS)):
-            plt.fill(self.XY[self.ELS[i, :], 0], self.XY[self.ELS[i, :], 1], edgecolor='k', fill=False)
+            pass#plt.fill(self.XY[self.ELS[i, :], 0], self.XY[self.ELS[i, :], 1], edgecolor='k', fill=False)
 
 
         if show_ids:
             for i in range(4):                             #loop over all nodes within an element
                 for j in range(len(self.ELS)):                  #loop over all elements
                     sh=0.01
-                    plt.text(self.XY[self.ELS[j,i],0]+sh,self.XY[self.ELS[j,i],1]+sh, self.ELS[j,i])
+                    try: 
+                        plt.text(self.XY[self.ELS[j,i],0]+sh,self.XY[self.ELS[j,i],1]+sh, self.ELS[j,i])
+                    except:
+                        pass
 
         # Set chart title.
         plt.title(title, fontsize=19)
@@ -170,25 +173,24 @@ class Mesh():
         for i in range(len(mesh2_ELS_copy)):
             for j in range(4):
                 # Replace node ids in mesh2 with duplicates in self
-                mask = (mesh1_shared == mesh2_ELS_copy[i, j])
+                mask = (mesh2_shared == mesh2_ELS_copy[i, j])
                 if np.sum(mask):
                     # ELS[i, j] is a shared node
-                    mesh2_ELS_copy[i, j] = mesh1_shared[mask][0]
+                    mesh2_ELS_copy[i, j] = mesh1_shared[mask]
                 else:
                     # no shared nodes
-                    elem_offset = offset #- np.sum(mesh2_ELS_copy[i, j] < mesh1_shared)
+                    elem_offset = offset - np.sum(mesh1_shared > mesh2_ELS_copy[i, j])
                     mesh2_ELS_copy[i, j] += elem_offset
         
         #mask = np.arange(self.nx * self.ny) != mesh1_shared
         #mesh2_ELS_copy[mask] += (np.max(self.ELS) + 1) # Relabel new nodes
 
 
-        mask = np.arange(mesh2.nx * mesh2.ny) != mesh2_shared
+        mask = np.array([np.product(mesh2_shared != i) for i in range(self.nx * self.ny)], dtype=bool)
+        print(mesh2.XY[mask])
 
-        total_XY = np.append(self.XY, mesh2.XY[mask][0, :, :], axis=0) # mask out duplicated nodes
+        total_XY = np.append(self.XY, mesh2.XY[mask], axis=0) # mask out duplicated nodes
         total_ELS = np.append(self.ELS, mesh2_ELS_copy, axis=0)
-        print(total_XY.shape)
-        print(total_ELS)
         self.XY = total_XY
         self.ELS = total_ELS
 
@@ -200,9 +202,11 @@ class Mesh():
             self.DOF[i, :] = [self.ELS[i,0]*2, self.ELS[i,1]*2-1, self.ELS[i,1]*2, self.ELS[i,1]*2+1, self.ELS[i,2]*2, self.ELS[i,2]*2+1, self.ELS[i,3]*2, self.ELS[i,3]*2+1]
         
         # Merge pins
-        self.pins = np.append(self.pins, mesh2.pins[mask][0, :, :], axis=0)
+        self.pins = np.append(self.pins, mesh2.pins[mask], axis=0)
         #Merge forces
-        self.forces = np.append(self.forces, mesh2.forces[mask][0, :, :], axis=0)
+        self.forces = np.append(self.forces, mesh2.forces[mask], axis=0)
+
+        print(self.ELS)
 
         return self
 

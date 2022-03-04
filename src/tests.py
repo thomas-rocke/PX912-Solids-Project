@@ -22,18 +22,19 @@ plt.show()
 
 n = 3
 
-mesh = Mesh(corners, n, n, coord_func=Uniform)
+mesh = Mesh(corners, n, n, coord_func=CornerBias)
 
 corners2 = np.array([[0, 2],
                      [3, 1],
                      [2, 1],
                      [0, 1]])
-mesh2 = Mesh(corners2, n, n, coord_func=Uniform)
+mesh2 = Mesh(corners2, n, n, coord_func=CornerBias)
 mesh.plot()
 mesh2.plot()
 
 comb = mesh + mesh2
-comb.plot()
+comb.plot(show_ids=True)
+
 '''
 force = np.array([0, -20])
 edge='top'
