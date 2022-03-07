@@ -21,6 +21,7 @@ class Mesh():
         coord_func(corners, nx, ny) is a generates the coordinates for each of the integration points
         '''
         self.corners=corners
+        self.all_corners = corners
         self.nx = nx
         self.ny = ny
         self.nnodes = nx * ny
@@ -29,10 +30,10 @@ class Mesh():
         self.pins = np.array([False] * 2 * nx * ny).reshape((nx*ny, 2))
         self.forces = np.zeros_like(self.pins)
 
-        self.edges = {'top' : np.array([ny * (i + 1) - 1 for i in range(nx)]),
-                      'bottom' : np.array([i * (ny) for i in range(nx)]),
-                      'left' : np.array([i for i in range(ny)]),
-                      'right' : np.array([(nx-1)*ny + i for i in range(ny)])}
+        self.edges = {'bottom' : np.array([ny * (i + 1) - 1 for i in range(nx)]),
+                      'top' : np.array([i * (ny) for i in range(nx)]),
+                      'right' : np.array([i for i in range(ny)]),
+                      'left' : np.array([(nx-1)*ny + i for i in range(ny)])}
     
     def make_mesh(self):
         '''
@@ -85,7 +86,7 @@ class Mesh():
             plt.plot(self.XY[cond==True, 0], self.XY[cond==True, 1], 'sk', label='Free')
 
         for i in range(len(self.ELS)):
-            pass#plt.fill(self.XY[self.ELS[i, :], 0], self.XY[self.ELS[i, :], 1], edgecolor='k', fill=False)
+            plt.fill(self.XY[self.ELS[i, :], 0], self.XY[self.ELS[i, :], 1], edgecolor='k', fill=False)
 
 
         if show_ids:
@@ -108,20 +109,13 @@ class Mesh():
 
         plt.show()
 
-    def set_pins(self, pins):
-        '''
-        Defines pinning conditions
-
-        pins should be a shape (nnodes, 2) boolean array
-        pins[i, j] pins node i in the xj direction
-        '''
-        self.pins = pins
-
     def copy(self):
         return Mesh(self.corners, self.nx, self.ny, self.node_dist)
     
     def __add__(self, mesh2):
         mesh1 = self.copy()
+        mesh1.pins = self.pins
+        mesh1.forces = self.forces
         mesh1 += mesh2
         return mesh1
     
@@ -144,22 +138,22 @@ class Mesh():
         assert self.node_dist == mesh2.node_dist
 
         # Find shared edge
-        if np.all(self.XY[self.edges['left']] == mesh2.XY[mesh2.edges['right']]):
+        if np.sum(np.abs(self.XY[self.edges['left']] - mesh2.XY[mesh2.edges['right']])) < 1.0E-8:
             # mesh2 is to the left of self
             mesh1_shared = self.edges['left']
             mesh2_shared = mesh2.edges['right']
         
-        elif np.all(self.XY[self.edges['right']] == mesh2.XY[mesh2.edges['left']]):
+        elif np.sum(np.abs(self.XY[self.edges['right']] - mesh2.XY[mesh2.edges['left']])) < 1.0E-8:
             # mesh2 is to the right
             mesh1_shared = self.edges['right']
             mesh2_shared = mesh2.edges['left']
         
-        elif np.all(self.XY[self.edges['top']] == mesh2.XY[mesh2.edges['bottom']]):
+        elif np.sum(np.abs(self.XY[self.edges['top']] - mesh2.XY[mesh2.edges['bottom']])) < 1.0E-8:
             # mesh2 is above
             mesh1_shared = self.edges['top']
             mesh2_shared = mesh2.edges['bottom']
 
-        elif np.all(self.XY[self.edges['bottom']] == mesh2.XY[mesh2.edges['top']]):
+        elif np.sum(np.abs(self.XY[self.edges['top']] - mesh2.XY[mesh2.edges['bottom']])) < 1.0E-8:
             #mesh2 is below
             mesh1_shared = self.edges['bottom']
             mesh2_shared = mesh2.edges['top']
@@ -179,15 +173,16 @@ class Mesh():
                     mesh2_ELS_copy[i, j] = mesh1_shared[mask]
                 else:
                     # no shared nodes
-                    elem_offset = offset - np.sum(mesh1_shared > mesh2_ELS_copy[i, j])
-                    mesh2_ELS_copy[i, j] += elem_offset
+                    mesh2_ELS_copy[i, j] += offset
         
-        #mask = np.arange(self.nx * self.ny) != mesh1_shared
-        #mesh2_ELS_copy[mask] += (np.max(self.ELS) + 1) # Relabel new nodes
+        
+        for i, node in enumerate(mesh2_shared[::-1]):
+            # Account for missing IDS (shift)
+            mesh2_ELS_copy[mesh2_ELS_copy > node + offset] -= 1
 
 
-        mask = np.array([np.product(mesh2_shared != i) for i in range(self.nx * self.ny)], dtype=bool)
-        print(mesh2.XY[mask])
+        mask = np.ones(mesh2.XY.shape[0], dtype=bool)
+        mask[mesh2_shared] = False
 
         total_XY = np.append(self.XY, mesh2.XY[mask], axis=0) # mask out duplicated nodes
         total_ELS = np.append(self.ELS, mesh2_ELS_copy, axis=0)
@@ -203,13 +198,42 @@ class Mesh():
         
         # Merge pins
         self.pins = np.append(self.pins, mesh2.pins[mask], axis=0)
+
         #Merge forces
         self.forces = np.append(self.forces, mesh2.forces[mask], axis=0)
 
-        print(self.ELS)
+        self.all_corners = np.unique(np.append(self.all_corners, mesh2.all_corners, axis=0), axis=0)
 
         return self
 
+    def pin_edge(self, edge, direction):
+        '''
+        Pins all nodes along a given edge, in the direction specified
+
+        edge in ('left', 'right', 'top', 'bottom')
+
+        direction is 0 (x_1 dirn) or 1 (x_2 dirn) 
+        '''
+
+        edge_nodes = self.edges[edge]
+
+        self.pins[edge_nodes, direction] = True
+
+
+    def apply_load(self, forces, edge):
+        '''
+        Applies loading forces to the system
+        forces is a len 2 float array,
+        and edge in ('left', 'right', 'top', 'bottom') is the edge to apply forces to
+        '''
+        try:
+           assert len(forces) == 2
+        except AssertionError:
+            print(f"Force length error: input length {len(forces)}, expected 2")
+            pass
+        edge_nodes = self.edges[edge]
+
+        self.forces[edge_nodes, :] = forces
 
 
 

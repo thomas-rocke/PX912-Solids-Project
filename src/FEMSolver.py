@@ -6,6 +6,10 @@ from cProfile import label
 from attr import attributes
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from pyrsistent import v
+from tqdm import tqdm
+from copy import deepcopy as copy
 
 gauss_eval_points = { # Evaluation coordinates for Gaussian Quadrature integration
     1 : np.array([0]),
@@ -79,13 +83,17 @@ class FEM():
         Initialise FEM solver
         '''
 
-        self.mesh = mesh
+        self.mesh = mesh 
         self.E = E
         self.nu = nu
         self.elasticity = elasticity_func
         self.quad_points = quad_points
-        self.K = np.zeros((2 * self.mesh.nnodes, 2 * self.mesh.nnodes))
-        self.displacements = np.zeros((2 * self.mesh.nnodes))
+
+        self.nnodes = self.mesh.XY.shape[0]
+        self.K = np.zeros((2 * self.nnodes, 2 * self.nnodes))
+        self.displacements = np.zeros((2 * self.nnodes))
+        self.stresses = None
+        self.strains = None
 
     @property
     def forces(self):
@@ -147,47 +155,15 @@ class FEM():
         Evaluate stiffness matrix for all integration points
         '''
         # Reset K to 0
-        self.K = np.zeros((2 * self.mesh.nnodes, 2 * self.mesh.nnodes))
-        
-        for i, element in enumerate(self.mesh.ELS):
+        self.K = np.zeros((2 * self.nnodes, 2 * self.nnodes))
+        for i in tqdm(range(self.mesh.ELS.shape[0]), desc="Evaluating elemental Ks"):
+            element = self.mesh.ELS[i, :]
             # Find local k matrix
             corners = self.mesh.XY[element, :]
             k_element = self.Gauss_quad(corners)
 
             # Add local matrices together
             self.K[np.ix_(self.mesh.DOF[i, :], self.mesh.DOF[i, :])] += k_element
-    
-    def apply_load(self, forces, edge):
-        '''
-        Applies loading forces to the system
-        forces is a len 2 float array,
-        and edge in ('left', 'right', 'top', 'bottom') is the edge to apply forces to
-        '''
-        try:
-           assert len(forces) == 2
-        except AssertionError:
-            print(f"Force length error: input length {len(forces)}, expected 2")
-            pass
-        edge_nodes = self.mesh.edges[edge]
-
-        self.forces[2 * edge_nodes] = forces[0]
-        self.forces[2 * edge_nodes + 1] = forces[1]
-
-
-    def pin_edge(self, edge, direction):
-        '''
-        Pins all nodes along a given edge, in the direction specified
-
-        edge in ('left', 'right', 'top', 'bottom')
-
-        direction is 0 (x_1 dirn) or 1 (x_2 dirn) 
-        '''
-
-        edge_nodes = self.mesh.edges[edge]
-
-        self.mesh.pins[edge_nodes, direction] = True
-
-
 
     def solve(self):
         '''
@@ -201,21 +177,20 @@ class FEM():
         K_ef = self.K[is_pinned == False, :][:, is_pinned == True]
         K_ff = self.K[is_pinned == True, :][:, is_pinned == True]
 
-        Forces = self.forces[is_pinned == False]
+        Forces = self.mesh.forces.flatten()[is_pinned == False]
         
         disps = np.linalg.solve(K_ee, Forces)
 
         reactions = K_ef.T @ disps
         self.displacements[is_pinned==False] = disps
-        total_force = (self.K @ self.displacements)
-        print(total_force.reshape((self.mesh.nnodes, 2)))
+        self.total_force = (self.K @ self.displacements)
 
     def show_deformation(self, magnification=1):
 
         disps = magnification * self.displacements
 
         old_XY = self.mesh.XY
-        new_XY = self.mesh.XY + disps.reshape((self.mesh.nnodes, 2))
+        new_XY = self.mesh.XY + disps.reshape((self.nnodes, 2))
         plt.plot(old_XY[:, 0], old_XY[:, 1], 'sk', label='Undeformed shape')
         plt.plot(new_XY[:, 0], new_XY[:, 1], 'sr', label='Deformed Shape')
 
@@ -232,3 +207,193 @@ class FEM():
         plt.legend()
 
         plt.show()
+    
+    def get_props(self, lin_samples_per_elem:int=15):
+        '''
+        Get strain of solid, evaluating lin_samples_per_elem**2 points for each element
+        '''
+        nels = self.mesh.ELS.shape[0]
+
+        self.coords = np.zeros((nels*(lin_samples_per_elem)**2, 2)) #(x, y) coords for each evaluation point
+        self.strains = np.zeros((nels*(lin_samples_per_elem)**2, 3)) # strains for each evaluation point
+        self.stresses = np.zeros_like((self.strains))
+        self.disp_field = np.zeros_like((self.coords))
+        self.force_field = np.zeros_like((self.coords))
+
+
+        xis = np.linspace(-1, 1, lin_samples_per_elem)
+        etas = np.linspace(-1, 1, lin_samples_per_elem)
+
+        xis, etas = np.meshgrid(xis, etas)
+
+        for i in tqdm(range(self.mesh.ELS.shape[0]), desc="Generating stress coords across elements"):
+            el = self.mesh.ELS[i, :]
+            d = self.displacements[self.mesh.DOF[i, :]]
+            forces = self.total_force[self.mesh.DOF[i, :]]
+            corners = self.mesh.XY[el]
+            c = self.elasticity(*corners[0, :], self.E, self.nu)
+
+            for j in range(lin_samples_per_elem):
+                for k in range(lin_samples_per_elem):
+                    idx = i * lin_samples_per_elem**2  + j * lin_samples_per_elem + k
+
+                    b = self.strain_displacement(corners, xis[j, k], etas[j, k])
+                    shapes = N(xis[j, k], etas[j, k])
+                    self.strains[idx] = b @ d
+                    self.coords[idx] = shapes @ corners
+                    self.stresses[idx] =  c @ self.strains[idx]
+                    self.disp_field[idx] = shapes @ d.reshape((4, 2))
+                    self.force_field[idx] = shapes @ forces.reshape((4, 2))
+
+
+    def plot_props(self, shape_outline=None):
+        def mask_outside_polygon(poly_verts, ax=None):
+            """
+            Plots a mask on the specified axis ("ax", defaults to plt.gca()) such that
+            all areas outside of the polygon specified by "poly_verts" are masked.  
+
+            "poly_verts" must be a list of tuples of the verticies in the polygon in
+            counter-clockwise order.
+
+            Returns the matplotlib.patches.PathPatch instance plotted on the figure.
+            """
+            import matplotlib.patches as mpatches
+            import matplotlib.path as mpath
+
+            if ax is None:
+                ax = plt.gca()
+
+            # Get current plot limits
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+
+            # Verticies of the plot boundaries in clockwise order
+            outside_vertices = np.array([[xlim[0], ylim[0]],
+                                         [xlim[0], ylim[1]],
+                                         [xlim[1], ylim[1]],
+                                         [xlim[1], ylim[0]],
+                                         [xlim[0], ylim[0]]])[:, :, None]
+
+            outside_vertices = np.hstack((outside_vertices[:, 0, :], outside_vertices[:, 1, :]))
+
+
+            inside_vertices = np.hstack((poly_verts[:, 0][:, None], poly_verts[:, 1][:, None]))
+
+            ins_codes = np.ones(
+                len(inside_vertices), dtype=mpath.Path.code_type) * mpath.Path.LINETO
+            ins_codes[0] = mpath.Path.MOVETO
+
+            ots_codes = np.ones(
+                len(outside_vertices), dtype=mpath.Path.code_type) * mpath.Path.LINETO
+            ots_codes[0] = mpath.Path.MOVETO
+
+            # Concatenate the inside and outside subpaths together, changing their
+            # order as needed
+            vertices = np.concatenate((outside_vertices[::1],
+                                    inside_vertices[::-1]))
+            # Shift the path
+            #vertices[:, 0] += i * 2.5
+            # The codes will be all "LINETO" commands, except for "MOVETO"s at the
+            # beginning of each subpath
+            all_codes = np.concatenate((ots_codes, ins_codes))
+            # Create the Path object
+            path = mpath.Path(vertices, all_codes)
+            # Add plot it
+            patch = mpatches.PathPatch(path, facecolor='white', edgecolor='black')
+            ax.add_patch(patch)
+
+            return patch
+
+        def plotting_3(x, y, data, labels, corners):
+            fig, ax = plt.subplots(nrows=2, ncols = 2)
+
+            #poly2 = mask_outside_polygon(corners, ax[1, 0])
+            #poly3 = mask_outside_polygon(corners, ax[0, 1])
+            #poly4 = mask_outside_polygon(corners, ax[1, 1])
+            vmax = np.max(np.abs(data))
+            vmin = -vmax
+
+            col = ax[0, 0].tripcolor(x, y, data[:, 0], shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[0, 0].set_title(labels[0])
+            mask_outside_polygon(corners, ax[0, 0])
+
+
+            ax[1, 0].tripcolor(x, y, data[:, 1], shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[1, 0].set_title(labels[1])
+            mask_outside_polygon(corners, ax[1, 0])
+
+            ax[0, 1].tripcolor(x, y, data[:, 2], shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[0, 1].set_title(labels[2])
+            mask_outside_polygon(corners, ax[0, 1])
+
+            ax[1, 1].tripcolor(x, y, np.linalg.norm(data, axis=1), shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[1, 1].set_title(labels[3])
+            mask_outside_polygon(corners, ax[1, 1])
+            
+            
+            fig.subplots_adjust(right=0.8)
+            cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+            fig.colorbar(col, cax=cbar_ax)
+            plt.show()
+
+        def plotting_2(x, y, data, labels, corners):
+            fig, ax = plt.subplots(nrows=2, ncols = 2)
+
+            #poly2 = mask_outside_polygon(corners, ax[1, 0])
+            #poly3 = mask_outside_polygon(corners, ax[0, 1])
+            #poly4 = mask_outside_polygon(corners, ax[1, 1])
+
+            vmax = np.max(np.abs(data))
+            vmin = -vmax
+
+            col = ax[0, 0].tripcolor(x, y, data[:, 0], shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[0, 0].set_title(labels[0])
+            mask_outside_polygon(corners, ax[0, 0])
+
+
+            ax[1, 0].tripcolor(x, y, data[:, 1], shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[1, 0].set_title(labels[1])
+            mask_outside_polygon(corners, ax[1, 0])
+
+            ax[0, 1].tripcolor(x, y, np.linalg.norm(data, axis=1), shading='gouraud', vmin=vmin, vmax=vmax, clip_on=True, cmap='bwr')
+            ax[0, 1].set_title(labels[2])
+            mask_outside_polygon(corners, ax[0, 1])
+            
+            
+            fig.subplots_adjust(right=0.8)
+            cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+            fig.colorbar(col, cax=cbar_ax)
+            plt.show()
+
+        
+        coords = self.coords
+        strains = self.strains
+        stresses = self.stresses
+        disps = self.disp_field
+        forces = self.force_field
+
+
+        x = coords[:, 0]
+        y = coords[:, 1]
+
+        if shape_outline is None:
+            shape_outline = np.append(self.mesh.all_corners, self.mesh.all_corners[0, :][None, :], axis=0)
+
+
+        data = strains
+        labels = ["$\epsilon_{11}$", "$\epsilon_{22}$", "$\gamma_{12}$", "$|\epsilon|$"]
+        plotting_3(x, y, data, labels, shape_outline)
+
+        data = stresses
+        labels = ["$\sigma_{11}$", "$\sigma_{22}$", "$\sigma_{12}$", "$|\sigma|$"]
+        plotting_3(x, y, data, labels, shape_outline)
+
+        data = disps
+        labels = ["$x_1$ displacement", "$x_2$ displacement", "Total displacement"]
+        plotting_2(x, y, data, labels, shape_outline)
+
+        data = forces
+        labels = ["$F_{x_1}$", "$F_{x_2}$", "$|F|$"]
+        plotting_2(x, y, data, labels, shape_outline)
+
+

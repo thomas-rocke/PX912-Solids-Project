@@ -1,3 +1,4 @@
+from cv2 import solve
 import matplotlib
 from FEMSolver import FEM
 from NodeDists import *
@@ -20,33 +21,37 @@ plt.scatter(corners[:, 0], corners[:, 1], color='r')
 plt.show()
 '''
 
-n = 3
+n = 10
 
-mesh = Mesh(corners, n, n, coord_func=CornerBias)
-
+mesh = Mesh(corners, n, n, coord_func=Uniform)
+'''
 corners2 = np.array([[0, 2],
-                     [3, 1],
+                     [3, 2],
                      [2, 1],
                      [0, 1]])
-mesh2 = Mesh(corners2, n, n, coord_func=CornerBias)
-mesh.plot()
-mesh2.plot()
+mesh2 = Mesh(corners2, n, n, coord_func=Uniform)
+solver2 = FEM(mesh2, 1, 1)
+solver2.pin_edge('bottom', 1)
+
+#mesh.plot()
+#mesh2.plot()
 
 comb = mesh + mesh2
 comb.plot(show_ids=True)
 
 '''
-force = np.array([0, -20])
+force = np.array([0, 20])
 edge='top'
 
 solver = FEM(mesh, 3E7, 0.3, quad_points=5)
-solver.apply_load(force, edge)
-solver.pin_edge('left', 0)
-solver.pin_edge('left', 1)
+mesh.apply_load(force, edge)
+mesh.pin_edge('left', 0)
+mesh.pin_edge('left', 1)
 
 
 mesh.plot(show_ids=False)
 solver.solve()
 solver.show_deformation(magnification=10000)
-
-'''
+solver.get_props()
+solver.plot_props()
+plt.show()
