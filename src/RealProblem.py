@@ -3,7 +3,7 @@ from Meshing import Mesh
 from NodeDists import Uniform, CornerBias
 from FEMSolver import FEM
 
-n = 30
+n = 10
 func = Uniform
 E = 80.0E9
 nu = 0.3
