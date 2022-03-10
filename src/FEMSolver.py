@@ -88,8 +88,8 @@ class FEM():
         self.nnodes = self.mesh.XY.shape[0]
         self.K = np.zeros((2 * self.nnodes, 2 * self.nnodes))
         self.displacements = np.zeros((2 * self.nnodes))
-        self.stresses = None
-        self.strains = None
+        self.Stresses = None
+        self.Strains = None
 
     @property
     def forces(self):
@@ -204,17 +204,17 @@ class FEM():
 
         plt.show()
     
-    def get_props(self, lin_samples_per_elem:int=5, mpoints:int=7500):
+    def get_props(self, lin_samples_per_elem:int=10, mpoints:int=7500):
         '''
         Get strain of solid, evaluating lin_samples_per_elem**2 points for each element
         '''
         nels = self.mesh.ELS.shape[0]
 
         self.coords = np.zeros((nels*(lin_samples_per_elem)**2, 2)) #(x, y) coords for each evaluation point
-        self.strains = np.zeros((nels*(lin_samples_per_elem)**2, 3)) # strains for each evaluation point
-        self.stresses = np.zeros_like((self.strains))
-        self.disp_field = np.zeros_like((self.coords))
-        self.force_field = np.zeros_like((self.coords))
+        self.Strains = np.zeros((nels*(lin_samples_per_elem)**2, 3)) # strains for each evaluation point
+        self.Stresses = np.zeros_like((self.Strains))
+        self.Displacements = np.zeros_like((self.coords))
+        self.Forces = np.zeros_like((self.coords))
 
 
         xis = np.linspace(-1, 1, lin_samples_per_elem)
@@ -235,11 +235,11 @@ class FEM():
 
                     b = self.strain_displacement(corners, xis[j, k], etas[j, k])
                     shapes = N(xis[j, k], etas[j, k])
-                    self.strains[idx] = b @ d
+                    self.Strains[idx] = b @ d
                     self.coords[idx] = shapes @ corners
-                    self.stresses[idx] =  c @ self.strains[idx]
-                    self.disp_field[idx] = shapes @ d.reshape((4, 2))
-                    self.force_field[idx] = shapes @ forces.reshape((4, 2))
+                    self.Stresses[idx] =  c @ self.Strains[idx]
+                    self.Displacements[idx] = shapes @ d.reshape((4, 2))
+                    self.Forces[idx] = shapes @ forces.reshape((4, 2))
 
         # Map to uniform grid
         xmin = np.min(self.mesh.XY[:, 0])
@@ -253,22 +253,22 @@ class FEM():
         x, y = np.meshgrid(x, y)
         print("Projecting data onto uniform grid:")
         print("Projecting Stresses")
-        self.stresses = griddata(self.coords, self.stresses, (x, y), 'nearest')
+        self.Stresses = griddata(self.coords, self.Stresses, (x, y), 'linear', 0)
         print("Projecting Strains")
-        self.strains = griddata(self.coords, self.strains, (x, y), 'nearest')
+        self.Strains = griddata(self.coords, self.Strains, (x, y), 'linear', 0)
         print("Projecting Displacements")
-        self.disp_field = griddata(self.coords, self.disp_field, (x, y), 'nearest')
+        self.Displacements = griddata(self.coords, self.Displacements, (x, y), 'linear', 0)
         print("Projecting Forces")
-        self.force_field = griddata(self.coords, self.force_field, (x, y), 'nearest')
+        self.Forces = griddata(self.coords, self.Forces, (x, y), 'linear', 0)
         self.coords = (x, y)
 
     def plot_props(self, shape_outline=None):
               
         coords = self.coords
-        strains = self.strains
-        stresses = self.stresses
-        disps = self.disp_field
-        forces = self.force_field
+        strains = self.Strains
+        stresses = self.Stresses
+        disps = self.Displacements
+        forces = self.Forces
 
 
         x = coords[0]
