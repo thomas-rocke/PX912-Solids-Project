@@ -3,6 +3,42 @@ import numpy as np
 
 from NodeDists import *
 
+def shared_pairs(XY1, XY2, percent_tol=0.1):
+    '''
+    Finds all coincident coordinates, returning a list of indeces of 
+    XY1 and XY2 that correspond to shared coords 
+    
+    percent tol gives a spatial tolerance at which two coordinates are deemed coincident,
+    based on the minimum separation of coordinates in either XY1 or XY2
+
+    IE: i, j coincident if r_ij < percent_tol * r_min
+
+    '''
+    from scipy.spatial.distance import pdist, cdist
+
+    r_min = np.min([np.min(pdist(XY1)), np.min(pdist(XY2))]) # find minimum nodal separation in either subgrid
+    
+
+    dist_tol = percent_tol * r_min # Tolerance for coincidence
+
+    # Use cdist to find distances between all nodes in XY1 to all nodes in XY2
+    all_dists = cdist(XY1, XY2)
+
+    coincidence = all_dists < dist_tol 
+
+    # Generate masks where a node is coincident with another node
+    mask1 = np.sum(coincidence, axis=-1)>0
+    mask2 = np.sum(coincidence, axis=0)>0
+
+
+    #Generate IDs list for all nodes in XY1 and XY2
+    ids1 = np.arange(0, XY1.shape[0])
+    ids2 = np.arange(0, XY2.shape[0])
+
+    #Mask to only coincident node IDs
+    return ids1[mask1], ids2[mask2]
+
+
 class Mesh():
     '''
     Meshing class
@@ -69,6 +105,7 @@ class Mesh():
 
         #Fully Pinned
         cond = self.pins[:, 0] * self.pins[:, 1]
+
         if sum(cond):
             plt.plot(self.XY[cond==True, 0], self.XY[cond==True, 1], 'sg', label='Fully Pinned')
 
@@ -110,7 +147,15 @@ class Mesh():
         plt.show()
 
     def copy(self):
-        return Mesh(self.corners, self.nx, self.ny, self.node_dist)
+        mesh = Mesh(self.corners, self.nx, self.ny, self.node_dist)
+
+        mesh.all_corners = self.all_corners
+        mesh.XY = self.XY
+        mesh.ELS = self.ELS
+        mesh.DOF = self.DOF
+        mesh.pins = self.pins
+        mesh.forces = self.forces
+        return mesh
     
     def __add__(self, mesh2):
         mesh1 = self.copy()
@@ -128,38 +173,10 @@ class Mesh():
 
         Also requires the coord_func to be the same
         '''
-        # Check number of shared corners
-        assert np.sum(np.in1d(self.corners[:, 0], mesh2.corners[:, 0]) * np.in1d(self.corners[:, 1], mesh2.corners[:, 1])) == 2
-
-        # Check if nx or ny match
-        assert (self.nx == mesh2.nx) + (self.ny == mesh2.ny)
-
         # Check if coord_func bias method is the same
         assert self.node_dist == mesh2.node_dist
-
         # Find shared edge
-        if np.sum(np.abs(self.XY[self.edges['left']] - mesh2.XY[mesh2.edges['right']])) < 1.0E-8:
-            # mesh2 is to the left of self
-            mesh1_shared = self.edges['left']
-            mesh2_shared = mesh2.edges['right']
-        
-        elif np.sum(np.abs(self.XY[self.edges['right']] - mesh2.XY[mesh2.edges['left']])) < 1.0E-8:
-            # mesh2 is to the right
-            mesh1_shared = self.edges['right']
-            mesh2_shared = mesh2.edges['left']
-        
-        elif np.sum(np.abs(self.XY[self.edges['top']] - mesh2.XY[mesh2.edges['bottom']])) < 1.0E-8:
-            # mesh2 is above
-            mesh1_shared = self.edges['top']
-            mesh2_shared = mesh2.edges['bottom']
-
-        elif np.sum(np.abs(self.XY[self.edges['top']] - mesh2.XY[mesh2.edges['bottom']])) < 1.0E-8:
-            #mesh2 is below
-            mesh1_shared = self.edges['bottom']
-            mesh2_shared = mesh2.edges['top']
-        
-        else:
-            raise Exception("Could not find a shared edge")
+        mesh1_shared, mesh2_shared = shared_pairs(self.XY, mesh2.XY)
 
         mesh2_ELS_copy = mesh2.ELS.copy()
 
@@ -185,6 +202,15 @@ class Mesh():
         mask[mesh2_shared] = False
 
         total_XY = np.append(self.XY, mesh2.XY[mask], axis=0) # mask out duplicated nodes
+
+        # Merge pins
+        self.pins = np.append(self.pins, mesh2.pins[mask], axis=0)
+
+        #Merge forces
+        self.forces = np.append(self.forces, mesh2.forces[mask], axis=0)
+        
+        #mask = np.ones(mesh2.XY.shape[0], dtype=bool)
+        #total_XY = np.append(self.XY, mesh2.XY, axis=0)
         total_ELS = np.append(self.ELS, mesh2_ELS_copy, axis=0)
         self.XY = total_XY
         self.ELS = total_ELS
@@ -195,12 +221,6 @@ class Mesh():
         # Regenerate dofs
         for i in range(nnodes):
             self.DOF[i, :] = [self.ELS[i,0]*2, self.ELS[i,1]*2-1, self.ELS[i,1]*2, self.ELS[i,1]*2+1, self.ELS[i,2]*2, self.ELS[i,2]*2+1, self.ELS[i,3]*2, self.ELS[i,3]*2+1]
-        
-        # Merge pins
-        self.pins = np.append(self.pins, mesh2.pins[mask], axis=0)
-
-        #Merge forces
-        self.forces = np.append(self.forces, mesh2.forces[mask], axis=0)
 
         self.all_corners = np.unique(np.append(self.all_corners, mesh2.all_corners, axis=0), axis=0)
 

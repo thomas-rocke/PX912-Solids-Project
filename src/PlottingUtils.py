@@ -20,8 +20,8 @@ def mask_outside_polygon(poly_verts, ax=None):
         ax = plt.gca()
 
     # Get current plot limits
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
+    xlim = np.array(ax.get_xlim())*1.1
+    ylim = np.array(ax.get_ylim())*1.1
 
     # Verticies of the plot boundaries in clockwise order
     outside_vertices = np.array([[xlim[0], ylim[0]],
@@ -55,7 +55,7 @@ def mask_outside_polygon(poly_verts, ax=None):
     # Create the Path object
     path = mpath.Path(vertices, all_codes)
     # Add plot it
-    patch = mpatches.PathPatch(path, facecolor='white', edgecolor='black')
+    patch = mpatches.PathPatch(path, facecolor='blue', edgecolor='black')
     ax.add_patch(patch)
 
     return patch
@@ -93,8 +93,8 @@ def plotting_3(x, y, data, labels, corners):
     mask_outside_polygon(corners, ax[1, 1])
     
     
-    fig.subplots_adjust(right=0.8)
-    cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    fig.subplots_adjust(right=0.4)
+    cbar_ax = fig.add_axes([0.45, 0.15, 0.05, 0.7])
     fig.colorbar(col, cax=cbar_ax)
     plt.show()
 
@@ -128,7 +128,7 @@ def plotting_2(x, y, data, labels, corners):
     
     ax[1, 1].axis('off')
     
-    fig.subplots_adjust(right=0.8)
-    cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    fig.subplots_adjust(right=0.4)
+    cbar_ax = fig.add_axes([0.45, 0.15, 0.05, 0.7])
     fig.colorbar(col, cax=cbar_ax)
     plt.show()

@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from SampleShapes import *
 from PlottingUtils import *
-
+from scipy.signal import correlate
 
 def converge(shape, ns, mpoints):
 
@@ -62,36 +62,63 @@ def converge(shape, ns, mpoints):
     plt.plot(nnodes[:-1], stress_err[:-1])
     plt.yscale("log")
     plt.xlabel("Number of Nodes")
-    plt.ylabel(f"Log error on normed Stresses")
+    plt.ylabel(f"Error on normed Stresses")
     plt.title(f"Error convergence of Stress with increasing mesh complexity")
     plt.show()
 
     plt.plot(nnodes[:-1], strain_err[:-1])
     plt.yscale("log")
     plt.xlabel("Number of Nodes")
-    plt.ylabel(f"Log error on normed Strains")
+    plt.ylabel(f"Error on normed Strains")
     plt.title(f"Error convergence of Strain with increasing mesh complexity")
     plt.show()
 
     plt.plot(nnodes[:-1], disp_err[:-1])
     plt.yscale("log")
     plt.xlabel("Number of Nodes")
-    plt.ylabel(f"Log error on normed Displacements")
+    plt.ylabel(f"Error on normed Displacements")
     plt.title(f"Error convergence of Displacement with increasing mesh complexity")
     plt.show()
 
     plt.plot(nnodes[:-1], force_err[:-1])
     plt.yscale("log")
     plt.xlabel("Number of Nodes")
-    plt.ylabel(f"Log error on normed Forces")
+    plt.ylabel(f"Error on normed Forces")
     plt.title(f"Error convergence of Force with increasing mesh complexity")
     plt.show()
 
+    return nnodes[:-1], stress_err[:-1]
 
-mpoints = 4000
 
-ns = np.unique(np.logspace(np.log10(2), np.log10(150), 15).astype(int))
-print(len(ns))
+
+
+mpoints = 2500
+
+ns_c = np.unique(np.logspace(np.log10(2), np.log10(30), 10).astype(int))
+ns_i = np.unique(np.logspace(np.log10(2), np.log10(20), 10).astype(int))
+
+
+c_nodes, c_err = converge(C_shape, ns_c, mpoints)
+i_nodes, i_err = converge(I_shape, ns_i, mpoints)
+
+ref_n = np.logspace(1, np.log10(500), 1000)
+ref_n_2 = np.logspace(1, 3, 1000)
+ref_e = 10/ref_n**2
+ref_e_2 = 3/ref_n_2
+
+plt.plot(c_nodes, c_err, label='Symmetry Reduced Shape')
+plt.plot(i_nodes, i_err, label='Full Shape')
+plt.plot(ref_n, ref_e, label="$\mathcal{O}(n^{-2})$ reference line", linestyle='dashed')
+plt.plot(ref_n_2, ref_e_2, label="$\mathcal{O}(n^{-1})$ reference line", linestyle='dashed')
+plt.title("Comparison of Stress Convergence")
+plt.xlabel("Number of Nodes")
+plt.ylabel("Error on Normed Stresses")
+plt.xscale("log")
+plt.yscale("log")
+plt.legend()
+plt.show()
+
+'''
 #solver = simple_shape(100)
 #print(solver.mesh.XY.shape[0])
 #solver.mesh.plot()
@@ -99,4 +126,54 @@ print(len(ns))
 #solver.get_props()
 #solver.plot_props()
 
-converge(simple_shape, ns, mpoints)
+nnodes = np.zeros_like(ns_c)
+max_disp = np.zeros_like(ns_c, dtype=float)
+
+for i, n in enumerate(ns_c):
+    solver = C_shape(n)
+    nnodes[i] = solver.mesh.XY.shape[0]
+    solver.solve()
+    solver.get_props(mpoints=mpoints)
+    max_disp[i] = np.max(np.linalg.norm(solver.Displacements, axis=-1))
+
+plt.plot(nnodes, max_disp)
+plt.title("Variation of Maximum Displacement with increasing Node count")
+plt.xlabel("Number of Nodes")
+plt.ylabel("Maximum |d|")
+#plt.xscale("log")
+plt.yscale("log")
+plt.show()
+
+coords = np.array([[0, 0],
+                   [0, 0.7],
+                   [0.25, 0.7],
+                   [0.25, 0.6],
+                   [0.1, 0.6], 
+                   [0.1, 0.1],
+                   [0.25, 0.1],
+                   [0.25, 0]])
+
+coords = np.array([[0.25, 0],
+                   [0.25, 0.1],
+                   [0.1, 0.1],
+                   [0.1, 0.6],
+                   [0.25, 0.6],
+                   [0.25, 0.7],
+                   [-0.25, 0.7],
+                   [-0.25, 0.6],
+                   [-0.1, 0.6],
+                   [-0.1, 0.1],
+                   [-0.25, 0.1],
+                   [-0.25, 0],
+                   [0.25, 0]])
+
+solver = I_shape(15)
+#print(solver.mesh.ELS)
+#solver.mesh.plot()
+solver.solve()
+#solver.show_deformation(10**11)
+solver.get_props(lin_samples_per_elem=8, mpoints=2501)
+
+#plt.plot(coords[:, 0], coords[:, 1])
+#plt.show()
+solver.plot_props(shape_outline=coords)'''

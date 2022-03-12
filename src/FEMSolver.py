@@ -53,7 +53,6 @@ def eta_from_y_xi(y, xi):
     return (8 * y - 5)/(3 - xi)
 
 
-
 def N(xi, eta):
     '''Nodal functions; returns a vector as a function of xi, eta'''
     N1 = 0.25*(1.0-xi)*(1.0+eta)
@@ -74,7 +73,7 @@ def J_inv(xi, eta):
 
 
 class FEM():
-    def __init__(self, mesh:Mesh, E, nu, elasticity_func = Plane_Stress, quad_points=2):
+    def __init__(self, mesh:Mesh, E, nu, elasticity_func = Plane_Strain, quad_points=2):
         '''
         Initialise FEM solver
         '''
@@ -183,7 +182,7 @@ class FEM():
 
     def show_deformation(self, magnification=1):
 
-        disps = magnification * self.displacements
+        disps = -magnification * self.displacements
 
         old_XY = self.mesh.XY
         new_XY = self.mesh.XY + disps.reshape((self.nnodes, 2))
